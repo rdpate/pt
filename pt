@@ -1,0 +1,93 @@
+#!/bin/sh -ue
+#.help
+# % [UTIL [ARG..]]
+#
+# Execute "PARENT/.pt/UTIL ARG..", where PARENT is current or closest parent directory containing a ".pt" entry.  Without a UTIL, print PARENT.
+#
+# PARENT is determined by searching $PWD rather than following ".." entries.  In particular, $PWD may contain directory symlinks.  If ".pt" is a symlink, it is resolved; if ".pt" is a regular file, it is treated as if it was a symlink with a target of its first line.
+#
+# Recommendations:
+# * Don't create .pt unless you are the one using it -- that is, don't check into source control or otherwise include in distribution files.
+# * Project documentation merely needs to group all project tasks/utilities into one directory, which any user can then create .pt to point towards.
+
+fatal() {
+    printf "%s error: %s\n" "${0##*/}" "$2" >&2
+    exit "$1"
+}
+
+handle_option() { fatal 64 "unknown option: $1"; }
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --) shift; break ;;
+        --*=*) x="${1#--}"; handle_option "${x%%=*}" "${x#*=}"; shift ;;
+        --*) handle_option "${1#--}"; shift ;;
+        -?) handle_option "${1#-}"; shift ;;
+        -?*)
+            v="${1#??}"
+            x="${1%"$v"}"
+            handle_option "${x#-}" "$v"
+            shift
+            ;;
+        *) break ;;
+    esac
+done
+
+parent="$PWD"
+while :; do
+    if [ -e "$parent/.pt" ]; then
+        break
+    fi
+    if [ / = "$parent" ]; then
+        fatal 69 '.pt not found'
+    fi
+    parent="$(dirname "$parent")"
+done
+if [ $# -eq 0 ]; then
+    printf %s\\n "$parent"
+    exit
+fi
+
+case "$1" in
+    '')
+        fatal 64 'empty UTIL argument'
+        ;;
+    /*)
+        fatal 64 "UTIL cannot be absolute: $1"
+        ;;
+    ../*|*/../*|*/..)
+        fatal 64 "UTIL cannot use ..: $1"
+        ;;
+esac
+
+dir="$parent/.pt"
+resolve() {
+    # resolve PARENT LINKTEXT
+    case "$2" in
+        '') fatal 70 'empty target' ;;
+        /*) printf %s "$2" ;;
+        .)  printf %s "$1" ;;
+        *)  printf %s "$1/$2" ;;
+    esac
+}
+while :; do
+    if [ -L "$dir" ]; then
+        dir="$(resolve "$parent" "$(readlink "$dir")")"
+    elif [ -f "$dir" ]; then
+        line="$(head -n1 "$dir")"
+        [ -n "$line" ] || fatal 69 "empty first line: $dir"
+        dir="$(resolve "$parent" "$line")"
+    else
+        break
+    fi
+done
+set -- "$dir/$@"
+
+if [ ! -e "$1" ]; then
+    fatal 69 "not found: $1"
+fi
+if [ ! -f "$1" ] || [ ! -x "$1" ]; then
+    fatal 69 "not executable: $1"
+fi
+
+exec "$@"
