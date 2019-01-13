@@ -4,19 +4,28 @@
 #
 # Execute "PARENT/.pt/UTIL ARG..", where PARENT is current or closest parent directory containing a ".pt" entry.  Without a UTIL, print PARENT.
 #
+# Options:
+# -dN --dir=NAME              check for PARENT/NAME[/UTIL] also
+#
 # PARENT is determined by searching $PWD rather than following ".." entries.  In particular, $PWD may contain directory symlinks.  If ".pt" is a symlink, it is resolved; if ".pt" is a regular file, it is treated as if it was a symlink with a target of its first line.
 #
 # Recommendations:
+# * Alias or stub "pt" to run "project-task".
 # * Don't create .pt unless you are the one using it -- that is, don't check into source control or otherwise include in distribution files.
 # * Project documentation merely needs to group all project tasks/utilities into one directory, which any user can then create .pt to point towards.
 
-fatal() {
-    printf "%s error: %s\n" "${0##*/}" "$2" >&2
-    exit "$1"
-}
+fatal() { rc="$1"; shift; printf %s\\n "${0##*/} error: $*" >&2 || true; exit "$rc"; }
 
-handle_option() { fatal 64 "unknown option: $1"; }
-
+dir=
+handle_option() {
+    case "$1" in
+        d|dir)
+            [ -n "${2:-}" ] || fatal 64 "missing value for option $1"
+            dir="$2"
+            ;;
+        *) fatal 64 "unknown option $1" ;;
+        esac
+    }
 while [ $# -gt 0 ]; do
     case "$1" in
         --) shift; break ;;
@@ -30,23 +39,28 @@ while [ $# -gt 0 ]; do
             shift
             ;;
         *) break ;;
-    esac
-done
+        esac
+    done
 
 parent="$PWD"
 while :; do
     if [ -e "$parent/.pt" ]; then
+        dir="$parent/.pt"
         break
-    fi
+        fi
+    if [ -n "$dir" -a -e "$parent/$dir" ]; then
+        dir="$parent/$dir"
+        break
+        fi
     if [ / = "$parent" ]; then
         fatal 69 '.pt not found'
-    fi
+        fi
     parent="$(dirname "$parent")"
-done
+    done
 if [ $# -eq 0 ]; then
     printf %s\\n "$parent"
-    exit
-fi
+    exit 0
+    fi
 
 case "$1" in
     '')
@@ -58,18 +72,15 @@ case "$1" in
     ../*|*/../*|*/..)
         fatal 64 "UTIL cannot use ..: $1"
         ;;
-esac
-
-dir="$parent/.pt"
-resolve() {
-    # resolve PARENT LINKTEXT
+    esac
+resolve() {  # % PARENT LINKTEXT
     case "$2" in
-        '') fatal 70 'empty target' ;;
+        '') fatal 65 'empty target' ;;
         /*) printf %s "$2" ;;
         .)  printf %s "$1" ;;
         *)  printf %s "$1/$2" ;;
-    esac
-}
+        esac
+    }
 while :; do
     if [ -L "$dir" ]; then
         dir="$(resolve "$parent" "$(readlink "$dir")")"
@@ -79,15 +90,6 @@ while :; do
         dir="$(resolve "$parent" "$line")"
     else
         break
-    fi
-done
-set -- "$dir/$@"
-
-if [ ! -e "$1" ]; then
-    fatal 69 "not found: $1"
-fi
-if [ ! -f "$1" ] || [ ! -x "$1" ]; then
-    fatal 69 "not executable: $1"
-fi
-
-exec "$@"
+        fi
+    done
+exec "$dir/$@"
